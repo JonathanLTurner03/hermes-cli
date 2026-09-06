@@ -4,7 +4,7 @@ import subprocess
 
 import click
 
-from . import config
+from . import config, selfupdate
 from .compose.cli import COMMANDS as _compose_commands
 from .mount.cli import mount
 
@@ -38,6 +38,23 @@ def pull() -> None:
     )
     if result.returncode != 0:
         raise SystemExit(result.returncode)
+
+
+@main.command("self-update")
+@click.option("--check", is_flag=True, help="Only check for an update, don't apply it.")
+def self_update(check: bool) -> None:
+    """Update hc itself from its own git checkout (separate from `hc pull`, which updates the registry)."""
+    root = selfupdate.repo_root()
+    selfupdate.fetch(root)
+    if not selfupdate.behind_upstream(root):
+        click.echo(f"hc is up to date ({root})")
+        return
+    if check:
+        click.echo(f"update available in {root} — run `hc self-update` to install it")
+        return
+    click.echo(f"updating hc in {root} ...")
+    selfupdate.pull_and_install(root)
+    click.echo("hc updated")
 
 
 for _cmd in _compose_commands:
