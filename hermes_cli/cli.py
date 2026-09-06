@@ -4,7 +4,7 @@ import subprocess
 
 import click
 
-from . import config, selfupdate
+from . import config, privilege, selfupdate
 from .compose.cli import COMMANDS as _compose_commands
 from .mount.cli import mount
 
@@ -24,6 +24,7 @@ def main() -> None:
 )
 def init(server: str, registry_path: str) -> None:
     """Write host identity config (server name + registry path)."""
+    privilege.require_root()
     config.write_config(server, registry_path)
     click.echo(f"wrote {config.CONFIG_PATH}: server={server} registry_path={registry_path}")
 

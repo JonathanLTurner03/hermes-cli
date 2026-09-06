@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import click
 
-from .. import config
+from .. import config, privilege
 from . import registry, systemd
 
 
@@ -79,6 +79,7 @@ def _apply_pending(
 )
 def mount_sync(apply_: bool, force: bool, restart_docker: bool) -> None:
     """Render registry mount specs to systemd units and regenerate the docker.service drop-in."""
+    privilege.require_root()
     cfg = config.load_config()
     pools_by_name, specs = _load(cfg)
 
@@ -121,6 +122,7 @@ def mount_sync(apply_: bool, force: bool, restart_docker: bool) -> None:
 @click.argument("name")
 def mount_enable(name: str) -> None:
     """Enable and start a registered mount."""
+    privilege.require_root()
     cfg = config.load_config()
     pools_by_name, specs = _load(cfg)
     _enable_mount(specs, pools_by_name, name)
@@ -130,6 +132,7 @@ def mount_enable(name: str) -> None:
 @click.argument("name")
 def mount_disable(name: str) -> None:
     """Disable and stop a registered mount."""
+    privilege.require_root()
     cfg = config.load_config()
     pools_by_name, specs = _load(cfg)
     if name in pools_by_name:
