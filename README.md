@@ -28,7 +28,15 @@ Writes `/etc/hermes-cli/config.yml` with the server name and the local path of y
 hc pull
 ```
 
-Git-pulls the registry clone at the configured path.
+Git-pulls the registry clone at the configured path. This only updates the *registry* (compose/mount specs) — it does not update `hc` itself. For that, see `hc self-update` below.
+
+## Updating `hc` itself
+
+```
+hc self-update [--check]
+```
+
+`hc pull` only syncs the registry clone; it has no way to know about — let alone apply — changes to `hc`'s own source. `hc self-update` is the separate command for that: it finds its own git checkout (via the editable install's module path, so no extra config is needed), fetches, and compares `HEAD` against the tracking branch. With no changes upstream, it reports "up to date" and exits. If there's an update, `--check` reports it without applying anything; without `--check`, it fast-forwards the checkout (`git pull --ff-only`, refusing if the checkout has uncommitted local changes) and reruns `install.sh` to pick up any dependency changes. Requires the checkout to be on a branch with a configured upstream (i.e. cloned normally, not detached).
 
 ## Compose commands
 
