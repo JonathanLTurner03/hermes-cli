@@ -6,6 +6,7 @@ import click
 
 from . import config
 from .compose.cli import COMMANDS as _compose_commands
+from .mount.cli import mount
 
 
 @click.group()
@@ -41,6 +42,8 @@ def pull() -> None:
 
 for _cmd in _compose_commands:
     main.add_command(_cmd)
+
+main.add_command(mount)
 
 
 if __name__ == "__main__":
