@@ -21,6 +21,34 @@ def _load(cfg: dict) -> tuple[dict[str, registry.Pool], list[registry.MountSpec]
     return pools_by_name, specs
 
 
+def _complete_spec_name(ctx: click.Context, param: click.Parameter, incomplete: str) -> list[str]:
+    """Shell-completion source for enable/disable: registered mount specs only.
+
+    Excludes pools since enable/disable always refuse on one (they're
+    fstab-managed, not registry-managed) — no point suggesting a name that
+    can only produce an error. Swallows every failure (no config yet, no
+    registry, etc.) rather than raising — a completion request that errors
+    out just means no suggestions that keystroke, not a crash in the shell.
+    """
+    try:
+        cfg = config.load_config()
+        _, specs = _load(cfg)
+    except SystemExit:
+        return []
+    return [spec.name for spec in specs if spec.name.startswith(incomplete)]
+
+
+def _complete_mount_name(ctx: click.Context, param: click.Parameter, incomplete: str) -> list[str]:
+    """Shell-completion source for status: declared pools + registered mount specs."""
+    try:
+        cfg = config.load_config()
+        pools_by_name, specs = _load(cfg)
+    except SystemExit:
+        return []
+    names = list(pools_by_name) + [spec.name for spec in specs]
+    return [name for name in names if name.startswith(incomplete)]
+
+
 def _dep_unit(specs: list[registry.MountSpec], pools_by_name: dict[str, registry.Pool], depends_on: str) -> str:
     if depends_on in pools_by_name:
         return systemd.escape_unit_name(pools_by_name[depends_on].target)
@@ -119,7 +147,7 @@ def mount_sync(apply_: bool, force: bool, restart_docker: bool) -> None:
 
 
 @mount.command("enable")
-@click.argument("name")
+@click.argument("name", shell_complete=_complete_spec_name)
 def mount_enable(name: str) -> None:
     """Enable and start a registered mount."""
     privilege.require_root()
@@ -129,7 +157,7 @@ def mount_enable(name: str) -> None:
 
 
 @mount.command("disable")
-@click.argument("name")
+@click.argument("name", shell_complete=_complete_spec_name)
 def mount_disable(name: str) -> None:
     """Disable and stop a registered mount."""
     privilege.require_root()
@@ -193,7 +221,7 @@ def _print_detail(row: dict) -> None:
 
 
 @mount.command("status")
-@click.argument("name", required=False)
+@click.argument("name", required=False, shell_complete=_complete_mount_name)
 def mount_status(name: str | None) -> None:
     """Show status for one registered mount, or a table of every mount registered for this host."""
     cfg = config.load_config()

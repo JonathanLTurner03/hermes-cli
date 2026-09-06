@@ -10,8 +10,23 @@ from .. import config
 from . import docker, networks, registry
 
 
+def _complete_service(ctx: click.Context, param: click.Parameter, incomplete: str) -> list[str]:
+    """Shell-completion source for `<service>` arguments: registered service names for this host.
+
+    Swallows every failure (no config yet, no registry, etc.) rather than
+    raising — a completion request that errors out just means no suggestions
+    that keystroke, not a crash in the user's shell.
+    """
+    try:
+        cfg = config.load_config()
+        names = registry.list_services(cfg)
+    except SystemExit:
+        return []
+    return [name for name in names if name.startswith(incomplete)]
+
+
 @click.command()
-@click.argument("service")
+@click.argument("service", shell_complete=_complete_service)
 def up(service: str) -> None:
     """Start a service (docker compose up -d)."""
     cfg = config.load_config()
@@ -30,7 +45,7 @@ def up(service: str) -> None:
 
 
 @click.command()
-@click.argument("service")
+@click.argument("service", shell_complete=_complete_service)
 def down(service: str) -> None:
     """Stop a service (docker compose down)."""
     cfg = config.load_config()
@@ -38,7 +53,7 @@ def down(service: str) -> None:
 
 
 @click.command()
-@click.argument("service")
+@click.argument("service", shell_complete=_complete_service)
 def restart(service: str) -> None:
     """Restart a service (docker compose restart)."""
     cfg = config.load_config()
@@ -46,7 +61,7 @@ def restart(service: str) -> None:
 
 
 @click.command()
-@click.argument("service")
+@click.argument("service", shell_complete=_complete_service)
 @click.option("-f", "--follow", is_flag=True, help="Follow log output.")
 def logs(service: str, follow: bool) -> None:
     """Tail logs for a service."""
@@ -55,7 +70,7 @@ def logs(service: str, follow: bool) -> None:
 
 
 @click.command()
-@click.argument("service", required=False)
+@click.argument("service", required=False, shell_complete=_complete_service)
 def status(service: str | None) -> None:
     """Show `docker compose ps` for one service, or all registered services."""
     cfg = config.load_config()
@@ -75,7 +90,7 @@ def services() -> None:
 
 
 @click.command()
-@click.argument("service")
+@click.argument("service", shell_complete=_complete_service)
 def where(service: str) -> None:
     """Print the resolved path for a service (debug helper)."""
     cfg = config.load_config()
