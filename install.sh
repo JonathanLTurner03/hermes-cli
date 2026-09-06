@@ -26,4 +26,41 @@ python3 -m venv .venv
 sudo ln -sf "$(pwd)/.venv/bin/hc" /usr/local/bin/hc
 
 echo "hc installed -> $(readlink -f /usr/local/bin/hc)"
+
+# Shell completion: one line in the invoking user's shell rc file so `hc`
+# tab-completes commands, service names, and mount names (see README.md's
+# "Shell completion" section). Idempotent — skipped if already present —
+# so this is safe on every rerun, not just the first install.
+shell_name="$(basename "${SHELL:-}")"
+case "$shell_name" in
+    bash)
+        rcfile="$HOME/.bashrc"
+        completion_line='eval "$(_HC_COMPLETE=bash_source hc)"'
+        ;;
+    zsh)
+        rcfile="$HOME/.zshrc"
+        completion_line='eval "$(_HC_COMPLETE=zsh_source hc)"'
+        ;;
+    fish)
+        rcfile="$HOME/.config/fish/completions/hc.fish"
+        completion_line='_HC_COMPLETE=fish_source hc | source'
+        ;;
+    *)
+        rcfile=""
+        ;;
+esac
+
+if [[ -n "$rcfile" ]]; then
+    mkdir -p "$(dirname "$rcfile")"
+    touch "$rcfile"
+    if grep -qF '_HC_COMPLETE' "$rcfile" 2>/dev/null; then
+        echo "shell completion already configured in $rcfile"
+    else
+        echo "$completion_line" >> "$rcfile"
+        echo "added shell completion to $rcfile — restart your shell, or: source $rcfile"
+    fi
+else
+    echo "warning: unrecognized shell (\$SHELL=${SHELL:-unset}) — skipping shell completion setup; see README.md's 'Shell completion' section to add it by hand" >&2
+fi
+
 echo "next: hc init <server-name>"
