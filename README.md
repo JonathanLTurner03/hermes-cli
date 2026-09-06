@@ -40,6 +40,25 @@ hc self-update [--check]
 
 `hc pull` only syncs the registry clone; it has no way to know about — let alone apply — changes to `hc`'s own source. `hc self-update` is the separate command for that: it finds its own git checkout (via the editable install's module path, so no extra config is needed), fetches, and compares `HEAD` against the tracking branch. With no changes upstream, it reports "up to date" and exits. If there's an update, `--check` reports it without applying anything; without `--check`, it fast-forwards the checkout (`git pull --ff-only`, refusing if the checkout has uncommitted local changes) and reruns `install.sh` to pick up any dependency changes. Requires the checkout to be on a branch with a configured upstream (i.e. cloned normally, not detached).
 
+## Shell completion
+
+`hc` uses Click's built-in completion support, so command and option names complete for free. `<service>` and mount `<name>` arguments complete too, dynamically — they read the registry the same way the command itself would, so suggestions are always live (e.g. `hc mount enable <TAB>` only offers registry-managed specs, since pools always refuse; `hc mount status <TAB>` offers both).
+
+One-time setup, per shell:
+
+```
+# bash — add to ~/.bashrc
+eval "$(_HC_COMPLETE=bash_source hc)"
+
+# zsh — add to ~/.zshrc
+eval "$(_HC_COMPLETE=zsh_source hc)"
+
+# fish — add to ~/.config/fish/completions/hc.fish
+_HC_COMPLETE=fish_source hc | source
+```
+
+Dynamic completions shell out to `hc` itself on every `<TAB>`, so they only work once `hc init` has been run (before that, they just fail silently and offer nothing — no config to read yet).
+
 ## Compose commands
 
 | Command | What it does |
