@@ -19,10 +19,12 @@ cd hermes-cli
 ## First-time host setup
 
 ```
-sudo hc init <server-name> [--registry-path /opt/infra/hermes]
+hc init <server-name> [--registry-path /opt/infra/hermes]
 ```
 
-Writes `/etc/hermes-cli/config.yml` with the server name and the local path of your registry clone. `<server-name>` must match a directory name in the registry (`<registry_path>/<server-name>/`). Every other `hc` command reads this file first and fails immediately if it's missing. Writing it requires root; most read-only commands (`services`, `where`, `status`, `mount status`) don't.
+Writes `/etc/hermes-cli/config.yml` with the server name and the local path of your registry clone. `<server-name>` must match a directory name in the registry (`<registry_path>/<server-name>/`). Every other `hc` command reads this file first and fails immediately if it's missing.
+
+Writing it requires root — you don't need to type `sudo` yourself, though. `init` and the mount commands that write to `/etc` (`mount sync`/`enable`/`disable`) self-elevate: if not already running as root, they re-exec themselves under `sudo`, which prompts for your password exactly as if you'd typed `sudo hc ...`. This only works with a tty attached (interactive use); from a script or cron job with no terminal to prompt on, run those commands with `sudo` explicitly. Read-only commands (`services`, `where`, `status`, `mount status`) never need root and never prompt.
 
 ```
 hc pull
