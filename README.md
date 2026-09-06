@@ -14,7 +14,7 @@ cd hermes-cli
 ./install.sh
 ```
 
-`install.sh` creates a `.venv`, installs `hc` into it in editable mode, and symlinks it to `/usr/local/bin/hc`. Don't run the whole script with `sudo` — it checks for that and refuses; it prompts for elevation only for the final symlink step.
+`install.sh` creates a `.venv`, installs `hc` into it in editable mode, and symlinks it to `/usr/local/bin/hc`. Don't run the whole script with `sudo` — it checks for that and refuses; it prompts for elevation only for the final symlink step. It also sets up shell completion (see below) for `bash`/`zsh`/`fish` based on `$SHELL`, idempotently — safe to rerun on every `hc self-update`.
 
 ## First-time host setup
 
@@ -44,7 +44,9 @@ hc self-update [--check]
 
 `hc` uses Click's built-in completion support, so command and option names complete for free. `<service>` and mount `<name>` arguments complete too, dynamically — they read the registry the same way the command itself would, so suggestions are always live (e.g. `hc mount enable <TAB>` only offers registry-managed specs, since pools always refuse; `hc mount status <TAB>` offers both).
 
-One-time setup, per shell:
+`install.sh` sets this up automatically based on `$SHELL` — nothing to do beyond opening a new shell (or `source`ing your rc file) after installing. It's idempotent, so rerunning `install.sh` (e.g. after `hc self-update`) won't duplicate the line.
+
+If you ever need to add it by hand (unrecognized `$SHELL`, a different shell setup than the one `install.sh` detected, etc.):
 
 ```
 # bash — add to ~/.bashrc
