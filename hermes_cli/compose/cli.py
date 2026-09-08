@@ -4,9 +4,12 @@ by hermes_cli.cli.
 """
 from __future__ import annotations
 
+import socket
+from pathlib import Path
+
 import click
 
-from .. import config
+from .. import config, registry_git
 from . import docker, imageref, networks, registry, versioncheck
 
 
@@ -144,9 +147,24 @@ def _update_one_versioned(cfg: dict, name: str, check: bool) -> bool:
         click.echo(f"{name}: cancelled, no changes made")
         return True
 
+    registry_root = Path(cfg["registry_path"])
+    base = registry_git.prepare(registry_root)
+
     _, old_image, new_image = registry.rewrite_image_tag(compose_path, chosen)
-    click.echo(f"wrote {compose_path} (image: {old_image} -> {new_image})")
-    click.echo(f"not applied yet — commit + push this change, then:\n  hc pull && hc update {name}")
+    branch = f"hc-update/{name}-{chosen}"
+    message = (
+        f"hc update: {name} {current_tag} -> {chosen}\n"
+        f"\n"
+        f"Image: {old_image} -> {new_image}\n"
+        f"Applied automatically by `hc update {name}` on {socket.gethostname()} "
+        f"(server: {cfg['server']})."
+    )
+    registry_git.commit_and_merge(registry_root, compose_path, branch, base, message)
+    click.echo(f"{name}: committed and pushed ({current_tag} -> {chosen})")
+    click.echo(
+        f"run `hc update {name}` again to pull and apply it "
+        f"(on another host: `hc pull && hc update {name}`)"
+    )
     return True
 
 
@@ -179,15 +197,22 @@ def update(service: str | None, check: bool) -> None:
     (at least major.minor, e.g. 6.0, 6.3.0.45, or v1.50.1 — not :latest or
     a bare floating :6) on a Docker Hub or ghcr.io image, this checks the
     registry for newer versions instead of just re-pulling the same tag.
-    If any exist, it prompts you to pick one and rewrites the tag in the
-    registry's docker-compose.yml — it does NOT apply it (same "render,
-    don't auto-apply" convention as `hc mount sync`); commit, push,
-    `hc pull`, then re-run `hc update` to actually apply it. If none
-    exist, it falls back to the plain flow above. If the tag IS
-    version-shaped but the image is on some other registry, it says so
-    (only Docker Hub and ghcr.io are supported right now) and still falls
-    back rather than failing outright. `all` never triggers any of
-    this — bulk updates stay non-interactive.
+    If any exist, it prompts you to pick one, rewrites the tag in the
+    registry's docker-compose.yml, and commits + pushes that change itself
+    (on a throwaway branch, fast-forward merged back and deleted once the
+    push succeeds — see registry_git.py). It still does NOT pull/recreate
+    the container in the same run: re-run `hc update <service>` (this host
+    already has the new tag; other hosts need `hc pull` first) to actually
+    apply it — container disruption stays a deliberate, separate step even
+    though the registry write is now automatic. Refuses if the registry
+    clone has uncommitted changes already sitting there, or can't be
+    fast-forwarded to match origin first — won't sweep unrelated changes
+    into its commit or risk a messy non-fast-forward push. If none exist,
+    it falls back to the plain flow above. If the tag IS version-shaped
+    but the image is on some other registry, it says so (only Docker Hub
+    and ghcr.io are supported right now) and still falls back rather than
+    failing outright. `all` never triggers any of this — bulk updates stay
+    non-interactive.
     """
     if service is None:
         raise SystemExit(
