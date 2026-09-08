@@ -70,20 +70,21 @@ Dynamic completions shell out to `hc` itself on every `<TAB>`, so they only work
 | `hc up <service>` | `docker compose up -d`. Refuses to start if the service declares `.env.secrets` as an `env_file` but none is present on disk. Creates any network the compose file marks `external: true` before starting. |
 | `hc down <service>` | `docker compose down` |
 | `hc restart <service>` | `docker compose restart` |
-| `hc update <service\|all> [--check]` | `docker compose pull` then `up -d`. For a moving tag (`:latest`, a floating `:6`, etc.), `up -d` alone won't notice a new build exists — it just reuses whatever's cached locally under that tag — so this pulls first to actually check the tag's current digest against the registry, then recreates only the containers whose image (or other config) changed. Same secrets/network preconditions as `up`. Requires an explicit target: a service name, or the literal `all` to update every registered service — bare `hc update` refuses rather than quietly updating the whole host, unlike `hc status`'s "no args means all". `--check` still pulls for real (so the answer reflects the registry's current state) but never recreates anything — just reports `up to date` or `update available` per target. For a single named service (not `all`) pinned to a version-shaped tag on a Docker Hub image, see "Version-pinned updates" below — it behaves differently. |
+| `hc update <service\|all> [--check]` | `docker compose pull` then `up -d`. For a moving tag (`:latest`, a floating `:6`, etc.), `up -d` alone won't notice a new build exists — it just reuses whatever's cached locally under that tag — so this pulls first to actually check the tag's current digest against the registry, then recreates only the containers whose image (or other config) changed. Same secrets/network preconditions as `up`. Requires an explicit target: a service name, or the literal `all` to update every registered service — bare `hc update` refuses rather than quietly updating the whole host, unlike `hc status`'s "no args means all". `--check` still pulls for real (so the answer reflects the registry's current state) but never recreates anything — just reports `up to date` or `update available` per target. For a single named service (not `all`) pinned to a version-shaped tag, see "Version-pinned updates" below — it behaves differently. |
+| `hc logs <service> [-f]` | `docker compose logs`, `-f` to follow |
+| `hc status [service]` | `docker compose ps` for one service, or every registered service if omitted |
 
 ### Version-pinned updates
 
-If a service's `image:` tag is version-shaped (at least major.minor, all-numeric — `6.0`, `6.3.0.45`; not `:latest` or a bare floating `:6`) and the image is on Docker Hub, `hc update <service>` checks Docker Hub for tags newer than the current one instead of just re-pulling the same tag (which would never find anything — a fixed version tag doesn't move). `all` never does this — bulk updates stay non-interactive.
+If a service's `image:` tag is version-shaped (at least major.minor, all-numeric, optionally `v`-prefixed — `6.0`, `6.3.0.45`, `v1.50.1`; not `:latest` or a bare floating `:6`) and the image is on a supported registry, `hc update <service>` checks that registry for tags newer than the current one instead of just re-pulling the same tag (which would never find anything — a fixed version tag doesn't move). `all` never does this — bulk updates stay non-interactive.
 
 - **Newer versions exist**: prints them and prompts `update to which version? (or q to quit)`. Picking one rewrites the `image:` tag in the registry's `docker-compose.yml` — only that line changes, comments/formatting/everything else in the file is untouched. **It does not apply the change** (same "render, don't auto-apply" convention as `hc mount sync`): commit, push, `hc pull`, then re-run `hc update <service>` to actually pull and recreate the container on the new tag.
 - **No newer versions**: reports `up to date` and (unless `--check`) still falls through to a plain pull + recreate, in case the same tag was re-pushed with a fix.
-- **Not eligible** (not Docker Hub, or tag isn't version-shaped): silently falls back to the ordinary pull-and-recreate behavior above — no error, no extra output.
-- **`--check`**: reports `up to date` or lists the newer versions, but never prompts and never touches Docker — the answer comes from Docker Hub's tag list alone.
+- **Not version-shaped at all** (`:latest`, a bare floating `:6`): silently falls back to the ordinary pull-and-recreate behavior above — no error, no extra output, this is the common case.
+- **Version-shaped, but on an unsupported registry**: reports that it can't check this one (names the registry host) and still falls back to the ordinary flow, rather than failing outright.
+- **`--check`**: reports `up to date` or lists the newer versions, but never prompts and never touches Docker — the answer comes entirely from the registry's tag list.
 
-Only supports Docker Hub images, and compose files with exactly one service (this registry's actual usage so far) — anything else falls back to the ordinary flow or errors clearly rather than guessing.
-| `hc logs <service> [-f]` | `docker compose logs`, `-f` to follow |
-| `hc status [service]` | `docker compose ps` for one service, or every registered service if omitted |
+Supports **Docker Hub** and **ghcr.io** (GitHub Container Registry) — anything else reports as unsupported and falls back, per above, rather than guessing at a different API shape. Only handles compose files with exactly one service (this registry's actual usage so far); anything else errors clearly.
 
 ## Mount commands
 
