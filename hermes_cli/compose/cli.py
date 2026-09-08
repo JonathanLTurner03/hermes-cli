@@ -9,7 +9,7 @@ from pathlib import Path
 
 import click
 
-from .. import config, registry_git
+from .. import config, github, registry_git
 from . import docker, imageref, networks, registry, versioncheck
 
 
@@ -147,24 +147,45 @@ def _update_one_versioned(cfg: dict, name: str, check: bool) -> bool:
         click.echo(f"{name}: cancelled, no changes made")
         return True
 
+    # Fail fast, before touching git at all, if there's nowhere to send the PR.
+    token = github.read_token()
+
     registry_root = Path(cfg["registry_path"])
     base = registry_git.prepare(registry_root)
 
     _, old_image, new_image = registry.rewrite_image_tag(compose_path, chosen)
     branch = f"hc-update/{name}-{chosen}"
-    message = (
-        f"hc update: {name} {current_tag} -> {chosen}\n"
-        f"\n"
-        f"Image: {old_image} -> {new_image}\n"
-        f"Applied automatically by `hc update {name}` on {socket.gethostname()} "
-        f"(server: {cfg['server']})."
+    title = f"hc update: {name} {current_tag} -> {chosen}"
+    host = socket.gethostname()
+    commit_message = (
+        f"{title}\n\nImage: {old_image} -> {new_image}\n"
+        f"Applied automatically by `hc update {name}` on {host} (server: {cfg['server']})."
     )
-    registry_git.commit_and_merge(registry_root, compose_path, branch, base, message)
-    click.echo(f"{name}: committed and pushed ({current_tag} -> {chosen})")
-    click.echo(
-        f"run `hc update {name}` again to pull and apply it "
-        f"(on another host: `hc pull && hc update {name}`)"
-    )
+    registry_git.commit_and_push_branch(registry_root, compose_path, branch, base, commit_message)
+
+    try:
+        owner, repo = github.parse_owner_repo(registry_git.remote_url(registry_root))
+        pr_url = github.create_pull_request(
+            owner,
+            repo,
+            title=title,
+            body=(
+                f"Image: `{old_image}` -> `{new_image}`\n\n"
+                f"Opened automatically by `hc update {name}` on `{host}` (server: `{cfg['server']}`)."
+            ),
+            head=branch,
+            base=base,
+            token=token,
+        )
+    except github.GitHubError as exc:
+        raise github.GitHubError(
+            f"{exc}\nbranch '{branch}' was pushed successfully — open the PR manually on GitHub, "
+            f"or fix the issue and rerun `hc update {name}` (it'll find nothing newer next time and "
+            f"just do a plain update instead, so you may need to remove that branch first)"
+        )
+
+    click.echo(f"{name}: opened {pr_url}")
+    click.echo(f"merge it on GitHub, then `hc pull && hc update {name}` to apply it")
     return True
 
 
@@ -198,21 +219,27 @@ def update(service: str | None, check: bool) -> None:
     a bare floating :6) on a Docker Hub or ghcr.io image, this checks the
     registry for newer versions instead of just re-pulling the same tag.
     If any exist, it prompts you to pick one, rewrites the tag in the
-    registry's docker-compose.yml, and commits + pushes that change itself
-    (on a throwaway branch, fast-forward merged back and deleted once the
-    push succeeds — see registry_git.py). It still does NOT pull/recreate
-    the container in the same run: re-run `hc update <service>` (this host
-    already has the new tag; other hosts need `hc pull` first) to actually
-    apply it — container disruption stays a deliberate, separate step even
-    though the registry write is now automatic. Refuses if the registry
-    clone has uncommitted changes already sitting there, or can't be
-    fast-forwarded to match origin first — won't sweep unrelated changes
-    into its commit or risk a messy non-fast-forward push. If none exist,
-    it falls back to the plain flow above. If the tag IS version-shaped
-    but the image is on some other registry, it says so (only Docker Hub
-    and ghcr.io are supported right now) and still falls back rather than
-    failing outright. `all` never triggers any of this — bulk updates stay
-    non-interactive.
+    registry's docker-compose.yml on a throwaway branch, commits, pushes
+    the branch, and opens a pull request via the GitHub API (see
+    github.py/registry_git.py) — it does NOT merge anything itself. A
+    human approves and merges the PR on GitHub, matching this project's
+    branch-and-review workflow (CLAUDE.md) extended to hc's own
+    auto-commits, not just interactive development. Needs a GitHub token
+    at /etc/hermes-cli/github_token on this host (checked before touching
+    git at all, so a missing token never leaves a half-done branch behind)
+    and the registry's origin remote to actually be on github.com. It
+    still does NOT pull/recreate the container in the same run either way:
+    once the PR is merged, `hc pull && hc update <service>` (on this host
+    or any other) actually applies it — container disruption stays a
+    deliberate, separate step even though opening the PR is now automatic.
+    Refuses if the registry clone has uncommitted changes already sitting
+    there, or can't be fast-forwarded to match origin first — won't sweep
+    unrelated changes into its commit or risk branching from a stale base.
+    If none exist, it falls back to the plain flow above. If the tag IS
+    version-shaped but the image is on some other registry, it says so
+    (only Docker Hub and ghcr.io are supported right now) and still falls
+    back rather than failing outright. `all` never triggers any of this —
+    bulk updates stay non-interactive.
     """
     if service is None:
         raise SystemExit(
