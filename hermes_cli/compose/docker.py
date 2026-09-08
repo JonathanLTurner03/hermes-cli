@@ -36,6 +36,20 @@ def restart(compose_path: Path) -> None:
     run(compose_path, "restart")
 
 
+def update(compose_path: Path) -> None:
+    """Re-pull image(s) and recreate any container whose image actually changed.
+
+    A plain `up -d` won't notice a moving tag (`:latest`, a floating `:6`,
+    etc.) has moved — it just reuses whatever's already cached locally under
+    that tag. `pull` always checks the tag's current digest against the
+    registry and only downloads if it changed; the follow-up `up -d` then
+    recreates only the containers whose image (or other config) actually
+    changed, leaving anything already current running untouched.
+    """
+    run(compose_path, "pull")
+    run(compose_path, "up", "-d")
+
+
 def logs(compose_path: Path, follow: bool = False) -> None:
     args = ["logs"]
     if follow:

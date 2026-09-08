@@ -25,11 +25,12 @@ def _complete_service(ctx: click.Context, param: click.Parameter, incomplete: st
     return [name for name in names if name.startswith(incomplete)]
 
 
-@click.command()
-@click.argument("service", shell_complete=_complete_service)
-def up(service: str) -> None:
-    """Start a service (docker compose up -d)."""
-    cfg = config.load_config()
+def _ensure_ready(cfg: dict, service: str):
+    """Preconditions shared by any command that starts/recreates containers:
+    refuse if declared secrets are missing, and make sure external networks
+    the compose file expects already exist. Returns the resolved compose
+    file path so the caller doesn't have to look it up again.
+    """
     compose_path = registry.compose_file(cfg, service)
 
     if registry.expects_secrets(cfg, service) and registry.secrets_file(cfg, service) is None:
@@ -41,6 +42,15 @@ def up(service: str) -> None:
     for net in registry.external_networks(cfg, service):
         networks.ensure(net)
 
+    return compose_path
+
+
+@click.command()
+@click.argument("service", shell_complete=_complete_service)
+def up(service: str) -> None:
+    """Start a service (docker compose up -d)."""
+    cfg = config.load_config()
+    compose_path = _ensure_ready(cfg, service)
     docker.up(compose_path)
 
 
@@ -71,6 +81,24 @@ def logs(service: str, follow: bool) -> None:
 
 @click.command()
 @click.argument("service", required=False, shell_complete=_complete_service)
+def update(service: str | None) -> None:
+    """Re-pull image(s) and recreate any container whose image actually changed.
+
+    For a moving tag (:latest, a floating :6, etc.) that's already cached
+    locally, `up` alone won't notice a new build exists — this pulls first
+    so the tag's current digest is actually checked against the registry.
+    One service, or every registered service if omitted.
+    """
+    cfg = config.load_config()
+    targets = [service] if service else registry.list_services(cfg)
+    for name in targets:
+        compose_path = _ensure_ready(cfg, name)
+        click.echo(f"── {name} ──")
+        docker.update(compose_path)
+
+
+@click.command()
+@click.argument("service", required=False, shell_complete=_complete_service)
 def status(service: str | None) -> None:
     """Show `docker compose ps` for one service, or all registered services."""
     cfg = config.load_config()
@@ -97,4 +125,4 @@ def where(service: str) -> None:
     click.echo(str(registry.service_path(cfg, service)))
 
 
-COMMANDS = [up, down, restart, logs, status, services, where]
+COMMANDS = [up, down, restart, update, logs, status, services, where]
