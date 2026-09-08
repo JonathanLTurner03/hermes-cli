@@ -25,6 +25,16 @@ def _complete_service(ctx: click.Context, param: click.Parameter, incomplete: st
     return [name for name in names if name.startswith(incomplete)]
 
 
+def _complete_service_or_all(ctx: click.Context, param: click.Parameter, incomplete: str) -> list[str]:
+    """Shell-completion source for `hc update`'s target: service names, plus the `all` keyword."""
+    try:
+        cfg = config.load_config()
+        names = registry.list_services(cfg)
+    except SystemExit:
+        names = []
+    return [name for name in ["all", *names] if name.startswith(incomplete)]
+
+
 def _ensure_ready(cfg: dict, service: str):
     """Preconditions shared by any command that starts/recreates containers:
     refuse if declared secrets are missing, and make sure external networks
@@ -80,17 +90,27 @@ def logs(service: str, follow: bool) -> None:
 
 
 @click.command()
-@click.argument("service", required=False, shell_complete=_complete_service)
+@click.argument("service", required=False, shell_complete=_complete_service_or_all)
 def update(service: str | None) -> None:
     """Re-pull image(s) and recreate any container whose image actually changed.
+
+    Requires an explicit target — a service name, or `all` for every
+    registered service on this host. Bare `hc update` refuses rather than
+    quietly updating everything: recreating every container on a host at
+    once is a bigger blast radius than a missing argument should trigger by
+    default (unlike e.g. `hc status`, where "no args means all" is harmless).
 
     For a moving tag (:latest, a floating :6, etc.) that's already cached
     locally, `up` alone won't notice a new build exists — this pulls first
     so the tag's current digest is actually checked against the registry.
-    One service, or every registered service if omitted.
     """
+    if service is None:
+        raise SystemExit(
+            "hc update needs a target — specify a service name, or `hc update all` "
+            "to update every registered service on this host"
+        )
     cfg = config.load_config()
-    targets = [service] if service else registry.list_services(cfg)
+    targets = registry.list_services(cfg) if service == "all" else [service]
     for name in targets:
         compose_path = _ensure_ready(cfg, name)
         click.echo(f"── {name} ──")
