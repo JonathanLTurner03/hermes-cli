@@ -70,7 +70,7 @@ Dynamic completions shell out to `hc` itself on every `<TAB>`, so they only work
 | `hc up <service>` | `docker compose up -d`. Refuses to start if the service declares `.env.secrets` as an `env_file` but none is present on disk. Creates any network the compose file marks `external: true` before starting. |
 | `hc down <service>` | `docker compose down` |
 | `hc restart <service>` | `docker compose restart` |
-| `hc update [service]` | `docker compose pull` then `up -d`, for one service or every registered service if omitted. For a moving tag (`:latest`, a floating `:6`, etc.), `up -d` alone won't notice a new build exists — it just reuses whatever's cached locally under that tag — so this pulls first to actually check the tag's current digest against the registry, then recreates only the containers whose image (or other config) changed. Same secrets/network preconditions as `up`. |
+| `hc update <service\|all>` | `docker compose pull` then `up -d`. For a moving tag (`:latest`, a floating `:6`, etc.), `up -d` alone won't notice a new build exists — it just reuses whatever's cached locally under that tag — so this pulls first to actually check the tag's current digest against the registry, then recreates only the containers whose image (or other config) changed. Same secrets/network preconditions as `up`. Requires an explicit target: a service name, or the literal `all` to update every registered service — bare `hc update` refuses rather than quietly updating the whole host, unlike `hc status`'s "no args means all". |
 | `hc logs <service> [-f]` | `docker compose logs`, `-f` to follow |
 | `hc status [service]` | `docker compose ps` for one service, or every registered service if omitted |
 
