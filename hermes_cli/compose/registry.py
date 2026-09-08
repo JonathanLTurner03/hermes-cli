@@ -13,7 +13,7 @@ import yaml
 from ruamel.yaml import YAML
 
 from .. import registry
-from . import dockerhub
+from . import imageref
 
 
 def service_path(config: dict, service: str) -> Path:
@@ -115,7 +115,7 @@ def rewrite_image_tag(compose_path: Path, new_tag: str) -> tuple[str, str, str]:
         raise registry.RegistryError(f"{compose_path}: service '{name}' has no 'image:' key")
 
     old_image = str(service["image"])
-    base, _old_tag = dockerhub.split_image_ref(old_image)
+    base, _old_tag = imageref.split_image_ref(old_image)
     new_image = f"{base}:{new_tag}"
 
     line_idx, _col = service.lc.value("image")

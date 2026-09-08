@@ -7,7 +7,7 @@ from __future__ import annotations
 import click
 
 from .. import config
-from . import docker, dockerhub, networks, registry
+from . import docker, imageref, networks, registry, versioncheck
 
 
 def _complete_service(ctx: click.Context, param: click.Parameter, incomplete: str) -> list[str]:
@@ -103,27 +103,36 @@ def _prompt_for_version(name: str, current_tag: str, newer: list[str]) -> str | 
 
 
 def _update_one_versioned(cfg: dict, name: str, check: bool) -> bool:
-    """Handle `hc update <name>` if it's pinned to a version-shaped tag on Docker Hub.
+    """Handle `hc update <name>` if it's pinned to a version-shaped tag on a
+    supported registry (Docker Hub, ghcr.io).
 
     Returns True if this fully handled the command (caller should stop).
     Returns False if either the image isn't eligible for version-checking
-    at all (not Docker Hub, or the current tag isn't version-shaped — e.g.
-    :latest, a bare floating :6), or it IS eligible but a real (non
-    --check) run found no newer version — both cases fall through to the
-    ordinary tag-agnostic pull-and-recreate flow below. --check stops
-    either way rather than falling through, since it should never touch
-    Docker at all when Docker Hub alone already gives a definitive answer.
+    at all (the current tag isn't version-shaped — e.g. :latest, a bare
+    floating :6), or it IS eligible but a real (non --check) run found no
+    newer version — both cases fall through to the ordinary tag-agnostic
+    pull-and-recreate flow below. --check stops either way rather than
+    falling through, since it should never touch Docker at all when the
+    registry alone already gives a definitive answer.
+
+    A version-shaped tag on a registry hc doesn't know how to query (not
+    Docker Hub or ghcr.io) also falls through — but reports why first,
+    since that's a real gap worth knowing about, not a silent no-op.
     """
     compose_path = registry.compose_file(cfg, name)
     current_image = registry.current_image(compose_path)
-    newer = dockerhub.check_for_newer(current_image)
+    try:
+        newer = versioncheck.check_for_newer(current_image)
+    except versioncheck.UnsupportedRegistryError as exc:
+        click.echo(f"{name}: {exc} — falling back to a plain update")
+        return False
     if newer is None:
         return False
 
-    current_tag = dockerhub.extract_tag(current_image)
+    current_tag = imageref.extract_tag(current_image)
 
     if not newer:
-        click.echo(f"{name}: up to date ({current_tag}, checked against Docker Hub)")
+        click.echo(f"{name}: up to date ({current_tag})")
         return check
 
     if check:
@@ -167,15 +176,18 @@ def update(service: str | None, check: bool) -> None:
     `hc self-update --check`'s `git fetch`.
 
     For a single named service (not `all`) pinned to a version-shaped tag
-    (at least major.minor, e.g. 6.0 or 6.3.0.45 — not :latest or a bare
-    floating :6) on a Docker Hub image, this checks Docker Hub for newer
-    versions instead of just re-pulling the same tag. If any exist, it
-    prompts you to pick one and rewrites the tag in the registry's
-    docker-compose.yml — it does NOT apply it (same "render, don't
-    auto-apply" convention as `hc mount sync`); commit, push, `hc pull`,
-    then re-run `hc update` to actually apply it. If none exist, or the
-    image isn't eligible, it falls back to the plain flow above. `all`
-    never triggers this — bulk updates stay non-interactive.
+    (at least major.minor, e.g. 6.0, 6.3.0.45, or v1.50.1 — not :latest or
+    a bare floating :6) on a Docker Hub or ghcr.io image, this checks the
+    registry for newer versions instead of just re-pulling the same tag.
+    If any exist, it prompts you to pick one and rewrites the tag in the
+    registry's docker-compose.yml — it does NOT apply it (same "render,
+    don't auto-apply" convention as `hc mount sync`); commit, push,
+    `hc pull`, then re-run `hc update` to actually apply it. If none
+    exist, it falls back to the plain flow above. If the tag IS
+    version-shaped but the image is on some other registry, it says so
+    (only Docker Hub and ghcr.io are supported right now) and still falls
+    back rather than failing outright. `all` never triggers any of
+    this — bulk updates stay non-interactive.
     """
     if service is None:
         raise SystemExit(
