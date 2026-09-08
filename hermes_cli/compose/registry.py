@@ -10,8 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+from ruamel.yaml import YAML
 
 from .. import registry
+from . import dockerhub
 
 
 def service_path(config: dict, service: str) -> Path:
@@ -59,6 +61,74 @@ def host_env_file(config: dict) -> Path | None:
 def host_secrets_file(config: dict) -> Path | None:
     path = registry.server_root(config) / ".env.secrets"
     return path if path.exists() else None
+
+
+def _single_service(compose_path: Path) -> tuple[str, dict]:
+    """(service name, service mapping) for a compose file's one and only service.
+
+    Raises RegistryError if the file doesn't define exactly one service —
+    version-tag rewriting only handles the common single-service-per-file
+    case this registry actually uses; anything else needs a hand edit.
+    """
+    data = yaml.safe_load(compose_path.read_text()) or {}
+    services = data.get("services") or {}
+    if len(services) != 1:
+        raise registry.RegistryError(
+            f"{compose_path}: expected exactly one service, found {len(services)}"
+        )
+    name = next(iter(services))
+    return name, services[name]
+
+
+def current_image(compose_path: Path) -> str:
+    """The `image:` value of a compose file's one and only service."""
+    name, service = _single_service(compose_path)
+    if "image" not in service:
+        raise registry.RegistryError(f"{compose_path}: service '{name}' has no 'image:' key")
+    return str(service["image"])
+
+
+def rewrite_image_tag(compose_path: Path, new_tag: str) -> tuple[str, str, str]:
+    """Rewrite the single service's image tag in place.
+
+    Only the exact line containing `image:` is touched — everything else in
+    the file (comments, formatting, key order) is left byte-for-byte
+    unchanged. Uses ruamel.yaml's round-trip loader purely to *locate* that
+    line (via its line/column tracking); the actual edit is a plain text
+    substitution on that one line, not a full YAML re-dump, so there's no
+    risk of ruamel reformatting anything else in the file.
+
+    Returns (service_name, old_image, new_image).
+    """
+    yaml_rt = YAML(typ="rt")
+    with compose_path.open() as f:
+        data = yaml_rt.load(f)
+
+    services = data.get("services") or {}
+    if len(services) != 1:
+        raise registry.RegistryError(
+            f"{compose_path}: expected exactly one service, found {len(services)}"
+        )
+    name = next(iter(services))
+    service = services[name]
+    if "image" not in service:
+        raise registry.RegistryError(f"{compose_path}: service '{name}' has no 'image:' key")
+
+    old_image = str(service["image"])
+    base, _old_tag = dockerhub.split_image_ref(old_image)
+    new_image = f"{base}:{new_tag}"
+
+    line_idx, _col = service.lc.value("image")
+    lines = compose_path.read_text().splitlines(keepends=True)
+    if old_image not in lines[line_idx]:
+        raise registry.RegistryError(
+            f"{compose_path}:{line_idx + 1}: expected to find '{old_image}' on this line — "
+            f"refusing to guess, edit the file by hand"
+        )
+    lines[line_idx] = lines[line_idx].replace(old_image, new_image, 1)
+    compose_path.write_text("".join(lines))
+
+    return name, old_image, new_image
 
 
 def external_networks(config: dict, service: str) -> list[str]:

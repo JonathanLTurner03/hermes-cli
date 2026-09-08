@@ -7,7 +7,7 @@ from __future__ import annotations
 import click
 
 from .. import config
-from . import docker, networks, registry
+from . import docker, dockerhub, networks, registry
 
 
 def _complete_service(ctx: click.Context, param: click.Parameter, incomplete: str) -> list[str]:
@@ -89,6 +89,58 @@ def logs(service: str, follow: bool) -> None:
     docker.logs(registry.compose_file(cfg, service), follow=follow)
 
 
+def _prompt_for_version(name: str, current_tag: str, newer: list[str]) -> str | None:
+    """Interactive picker over `newer`. Returns the chosen tag, or None if the user quit."""
+    click.echo(f"{name} is pinned to {current_tag}")
+    click.echo(f"newer versions available: {', '.join(newer)}")
+    while True:
+        choice = click.prompt(f"update {name} to which version? (or q to quit)")
+        if choice.lower() in ("q", "quit"):
+            return None
+        if choice in newer:
+            return choice
+        click.echo(f"'{choice}' isn't one of the offered versions — {', '.join(newer)} (or q to quit)")
+
+
+def _update_one_versioned(cfg: dict, name: str, check: bool) -> bool:
+    """Handle `hc update <name>` if it's pinned to a version-shaped tag on Docker Hub.
+
+    Returns True if this fully handled the command (caller should stop).
+    Returns False if either the image isn't eligible for version-checking
+    at all (not Docker Hub, or the current tag isn't version-shaped — e.g.
+    :latest, a bare floating :6), or it IS eligible but a real (non
+    --check) run found no newer version — both cases fall through to the
+    ordinary tag-agnostic pull-and-recreate flow below. --check stops
+    either way rather than falling through, since it should never touch
+    Docker at all when Docker Hub alone already gives a definitive answer.
+    """
+    compose_path = registry.compose_file(cfg, name)
+    current_image = registry.current_image(compose_path)
+    newer = dockerhub.check_for_newer(current_image)
+    if newer is None:
+        return False
+
+    current_tag = dockerhub.extract_tag(current_image)
+
+    if not newer:
+        click.echo(f"{name}: up to date ({current_tag}, checked against Docker Hub)")
+        return check
+
+    if check:
+        click.echo(f"{name}: update available — newer versions: {', '.join(newer)}")
+        return True
+
+    chosen = _prompt_for_version(name, current_tag, newer)
+    if chosen is None:
+        click.echo(f"{name}: cancelled, no changes made")
+        return True
+
+    _, old_image, new_image = registry.rewrite_image_tag(compose_path, chosen)
+    click.echo(f"wrote {compose_path} (image: {old_image} -> {new_image})")
+    click.echo(f"not applied yet — commit + push this change, then:\n  hc pull && hc update {name}")
+    return True
+
+
 @click.command()
 @click.argument("service", required=False, shell_complete=_complete_service_or_all)
 @click.option(
@@ -113,6 +165,17 @@ def update(service: str | None, check: bool) -> None:
     current state, not a stale local cache) but never recreates a
     container — same "real I/O, no service disruption" trade-off as
     `hc self-update --check`'s `git fetch`.
+
+    For a single named service (not `all`) pinned to a version-shaped tag
+    (at least major.minor, e.g. 6.0 or 6.3.0.45 — not :latest or a bare
+    floating :6) on a Docker Hub image, this checks Docker Hub for newer
+    versions instead of just re-pulling the same tag. If any exist, it
+    prompts you to pick one and rewrites the tag in the registry's
+    docker-compose.yml — it does NOT apply it (same "render, don't
+    auto-apply" convention as `hc mount sync`); commit, push, `hc pull`,
+    then re-run `hc update` to actually apply it. If none exist, or the
+    image isn't eligible, it falls back to the plain flow above. `all`
+    never triggers this — bulk updates stay non-interactive.
     """
     if service is None:
         raise SystemExit(
@@ -120,6 +183,10 @@ def update(service: str | None, check: bool) -> None:
             "to update every registered service on this host"
         )
     cfg = config.load_config()
+
+    if service != "all" and _update_one_versioned(cfg, service, check):
+        return
+
     targets = registry.list_services(cfg) if service == "all" else [service]
     for name in targets:
         compose_path = _ensure_ready(cfg, name)
