@@ -87,7 +87,20 @@ def parse_image_ref(image: str) -> tuple[str, str, str]:
 
 
 def fetch_tags(namespace: str, repo: str) -> list[str]:
-    """Every tag name for a Docker Hub repository, following pagination to the end."""
+    """Every tag name for a Docker Hub repository, following pagination as far as it goes.
+
+    Docker Hub caps pagination depth for anonymous (unauthenticated)
+    requests — confirmed live against library/nginx (1000+ tags): past
+    roughly page 10 it returns 403 with body
+    '{"message":"pagination offset too large for anonymous requests; sign
+    in to page further"}'. That's not a real failure worth surfacing: the
+    endpoint's default ordering is most-recently-pushed first, so what
+    gets cut off is the *oldest* tags — irrelevant to "is anything newer
+    than mine out there". Treated as "stop, use what's already collected"
+    rather than an error. Checking the response body (not just the status
+    code) keeps this from swallowing a 403 for some other reason, e.g. a
+    genuinely private/inaccessible repository.
+    """
     names: list[str] = []
     url = f"{API_BASE}/{namespace}/{repo}/tags?page_size=100"
     while url:
@@ -95,6 +108,8 @@ def fetch_tags(namespace: str, repo: str) -> list[str]:
             with urllib.request.urlopen(url, timeout=10) as resp:
                 data = json.load(resp)
         except urllib.error.HTTPError as exc:
+            if exc.code == 403 and b"pagination offset too large" in exc.read():
+                break
             if exc.code == 404:
                 raise DockerHubError(f"no such Docker Hub repository: {namespace}/{repo}")
             raise DockerHubError(f"Docker Hub returned HTTP {exc.code} for {namespace}/{repo}")
