@@ -91,7 +91,12 @@ def logs(service: str, follow: bool) -> None:
 
 @click.command()
 @click.argument("service", required=False, shell_complete=_complete_service_or_all)
-def update(service: str | None) -> None:
+@click.option(
+    "--check",
+    is_flag=True,
+    help="Only report whether an update is available for each target; never recreate anything.",
+)
+def update(service: str | None, check: bool) -> None:
     """Re-pull image(s) and recreate any container whose image actually changed.
 
     Requires an explicit target — a service name, or `all` for every
@@ -103,6 +108,11 @@ def update(service: str | None) -> None:
     For a moving tag (:latest, a floating :6, etc.) that's already cached
     locally, `up` alone won't notice a new build exists — this pulls first
     so the tag's current digest is actually checked against the registry.
+
+    --check still pulls for real (so the check reflects the registry's
+    current state, not a stale local cache) but never recreates a
+    container — same "real I/O, no service disruption" trade-off as
+    `hc self-update --check`'s `git fetch`.
     """
     if service is None:
         raise SystemExit(
@@ -114,7 +124,13 @@ def update(service: str | None) -> None:
     for name in targets:
         compose_path = _ensure_ready(cfg, name)
         click.echo(f"── {name} ──")
-        docker.update(compose_path)
+        if check:
+            if docker.check(compose_path):
+                click.echo(f"{name}: update available")
+            else:
+                click.echo(f"{name}: up to date")
+        else:
+            docker.update(compose_path)
 
 
 @click.command()
