@@ -1,5 +1,8 @@
 # hc — Hermes CLI
 
+> [!WARNING]
+> **Personal project — use at your own risk.** This is a side project I built to save myself time managing my own small homelab, not a maintained tool for general use. It leans heavily on AI as a development tool, because I don't have the spare time to hand-write and hand-test all of this myself on top of a full-time job and other projects. It's built and tested against my own specific setup and workflows — there's no unit test suite, no CI, and no guarantee any of it behaves correctly outside the exact scenarios I've personally exercised. If you use this, read the code first, understand what a command actually does before running it against anything you care about, and don't expect support.
+
 `hc` is a fleet-management CLI. It runs on each host in your fleet, reads a small per-host identity file, pulls configuration from a shared "hermes" git registry, and applies it locally: starting/stopping Docker Compose services and rendering/enabling systemd mount units. Nothing about *what* runs on a host is kept on the host itself — it all lives in the registry and gets applied via `hc`.
 
 This README covers the CLI. For how the registry repo itself is laid out — adding a new service, adding a mount spec, secrets handling — see that repo's own README.
