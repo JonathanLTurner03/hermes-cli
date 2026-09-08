@@ -17,6 +17,12 @@ from pathlib import Path
 
 TOKEN_PATH = Path("/etc/hermes-cli/github_token")
 
+# Fine-grained PATs are GitHub's current recommendation over classic tokens
+# (scoped to specific repos rather than everything the account can touch) —
+# this is the direct "create one" URL, shown by both `hc init`'s setup
+# prompt and read_token()'s error message so there's one place to update it.
+TOKEN_SETUP_URL = "https://github.com/settings/personal-access-tokens/new"
+
 API_BASE = "https://api.github.com"
 
 # Matches both the SSH form (git@github.com:owner/repo.git) and the HTTPS
@@ -36,13 +42,27 @@ def read_token() -> str:
     """
     if not TOKEN_PATH.exists():
         raise GitHubError(
-            f"no GitHub token at {TOKEN_PATH} — create a token with pull-request write access "
-            f"(fine-grained: Pull requests: Read and write) and place it there to enable PR creation"
+            f"no GitHub token at {TOKEN_PATH} — create one at {TOKEN_SETUP_URL} "
+            f"(needs 'Pull requests: Read and write' access to this repo) and place it there "
+            f"to enable PR creation, or rerun `hc init` to set it up interactively"
         )
     token = TOKEN_PATH.read_text().strip()
     if not token:
         raise GitHubError(f"{TOKEN_PATH} exists but is empty")
     return token
+
+
+def write_token(token: str) -> None:
+    """Writes the PR-creation token to TOKEN_PATH, root-readable only.
+
+    Called from `hc init`'s setup prompt (or its --github-token flag) — by
+    the time this runs, init has already self-elevated via
+    privilege.require_root(), so creating a file under /etc is expected to
+    just work here, not something this function needs to re-check itself.
+    """
+    TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TOKEN_PATH.write_text(token.strip() + "\n")
+    TOKEN_PATH.chmod(0o600)
 
 
 def parse_owner_repo(remote_url: str) -> tuple[str, str]:
