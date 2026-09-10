@@ -8,6 +8,7 @@ import click
 from . import config, github, privilege, selfupdate
 from .compose.cli import COMMANDS as _compose_commands
 from .mount.cli import mount
+from .secrets.cli import secrets
 
 
 @click.group()
@@ -104,6 +105,7 @@ for _cmd in _compose_commands:
     main.add_command(_cmd)
 
 main.add_command(mount)
+main.add_command(secrets)
 
 
 if __name__ == "__main__":

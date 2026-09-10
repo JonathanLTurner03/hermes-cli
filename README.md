@@ -72,7 +72,7 @@ Dynamic completions shell out to `hc` itself on every `<TAB>`, so they only work
 |---|---|
 | `hc services` | List services registered for this host |
 | `hc where <service>` | Print the resolved path to a service's directory (debug helper) |
-| `hc up <service>` | `docker compose up -d`. Refuses to start if the service declares `.env.secrets` as an `env_file` but none is present on disk. Creates any network the compose file marks `external: true` before starting. |
+| `hc up <service>` | `docker compose up -d`. Refuses to start if the service declares `.env.secrets` as an `env_file` but none is present on disk. Decrypts `secrets.enc.yaml` (if the service has one — see "Secrets commands" below) fresh via `sops`. Creates any network the compose file marks `external: true` before starting. |
 | `hc down <service>` | `docker compose down` |
 | `hc restart <service>` | `docker compose restart` |
 | `hc update <service\|all> [--check]` | `docker compose pull` then `up -d`. For a moving tag (`:latest`, a floating `:6`, etc.), `up -d` alone won't notice a new build exists — it just reuses whatever's cached locally under that tag — so this pulls first to actually check the tag's current digest against the registry, then recreates only the containers whose image (or other config) changed. Same secrets/network preconditions as `up`. Requires an explicit target: a service name, or the literal `all` to update every registered service — bare `hc update` refuses rather than quietly updating the whole host, unlike `hc status`'s "no args means all". `--check` still pulls for real (so the answer reflects the registry's current state) but never recreates anything — just reports `up to date` or `update available` per target. For a single named service (not `all`) pinned to a version-shaped tag, see "Version-pinned updates" below — it behaves differently. |
@@ -106,6 +106,17 @@ Typical flow for a new or changed mount: edit the registry, `hc pull`, `hc mount
 
 Storage pools (e.g. `mnt-pool`) are intentionally not registry-managed — each lives in `/etc/fstab` on the host. `hc` only ever references them by name/mount point via an optional `pools.yml` at the server root (a host can declare more than one) and will reject a registry mount spec that reuses a declared pool's name. See [mount-feature-doc.md](mount-feature-doc.md) for the full rationale.
 
+## Secrets commands
+
+`hc secrets` handles per-service secrets encrypted with [sops](https://github.com/getsops/sops) (backed by [age](https://github.com/FiloSottile/age)) instead of the out-of-band `.env.secrets` file — see the hermes registry's README for the full setup (generating an age keypair, adding it to `.sops.yaml`, referencing the result from a compose file). `hc` itself never touches age keys or `.sops.yaml` — both are entirely sops/age's own territory; `hc` only shells out to `sops` to decrypt at deploy time and to launch an edit session.
+
+| Command | What it does |
+|---|---|
+| `hc secrets edit <service>` | Opens `<service>/secrets.enc.yaml` in `$EDITOR` via `sops` — decrypted for editing, re-encrypted on save. Creates the file if it doesn't exist yet, per whichever `.sops.yaml` rule matches its path. |
+| `hc secrets sync [service]` | Decrypts `<service>/secrets.enc.yaml` (every registered service, if none named) and writes each top-level key to its own file under `<service>/secrets/<name>`, mode `600`. Runs automatically as part of `hc up`/`hc update` — this is a standalone entry point for re-syncing after rotating a value, or for debugging decryption without touching any container. A service with no `secrets.enc.yaml` is silently skipped. |
+
+`hc up`/`hc update` call the same decrypt-and-write step automatically before starting or recreating a container, right after the existing `.env.secrets` presence check — so a service with a `secrets.enc.yaml` always gets a fresh decrypt on every deploy, with nothing else to remember on the host beyond having run `age-keygen` once and having a matching `.sops.yaml` entry.
+
 ## How it's organized
 
-Each feature (compose, mount) is a self-contained subpackage: its own CLI commands, its own registry-path resolution, its own wrapper around the underlying tool (`docker`/`systemd`). See [CLAUDE.md](CLAUDE.md) for the exact layout and conventions if you're extending this — it's written for an AI coding agent working in this repo, but it's a reasonable map for a human too.
+Each feature (compose, mount, secrets) is a self-contained subpackage: its own CLI commands, its own registry-path resolution, its own wrapper around the underlying tool (`docker`/`systemd`/`sops`). See [CLAUDE.md](CLAUDE.md) for the exact layout and conventions if you're extending this — it's written for an AI coding agent working in this repo, but it's a reasonable map for a human too.
