@@ -43,12 +43,14 @@ Git-pulls the registry clone at the configured path. This only updates the *regi
 ## Updating `hc` itself
 
 ```
-hc self-update [--check] [--repo <url> [--token <token>]]
+hc self-update [--check] [--repo <url> [--token <token>] [--no-registry]]
 ```
 
 `hc pull` only syncs the registry clone; it has no way to know about — let alone apply — changes to `hc`'s own source. `hc self-update` is the separate command for that: it finds its own git checkout (via the editable install's module path, so no extra config is needed), fetches, and compares `HEAD` against the tracking branch. With no changes upstream, it reports "up to date" and exits. If there's an update, `--check` reports it without applying anything; without `--check`, it fast-forwards the checkout (`git pull --ff-only`, refusing if the checkout has uncommitted local changes) and reruns `install.sh` to pick up any dependency changes. Requires the checkout to be on a branch with a configured upstream (i.e. cloned normally, not detached).
 
 `--repo <url>` is a one-time switch: before checking/updating, it points the checkout's tracking remote (whatever `hc`'s current branch is actually configured against — usually `origin`, but looked up by name rather than assumed) at a new URL, most likely a self-hosted [SoftServe](https://github.com/charmbracelet/soft-serve) instance instead of GitHub. For an `http(s)://` URL, a SoftServe access token gets embedded automatically as the URL's basic-auth username — from `--token` if given, otherwise whatever's already configured at `/etc/hermes-cli/softserve_token` (see `hc init --softserve-token` above); with neither available, it fails clearly rather than switching to a URL nothing can authenticate against. An `ssh://` URL skips all of this and authenticates via SSH key/agent instead, same as any other SSH git remote — `--token` is ignored (with a warning) if passed alongside one. Once switched, the remote stays that way for every future plain `hc self-update` — `--repo` only needs to run again to switch somewhere else.
+
+If this host has already run `hc init`, `--repo` also switches the **hermes registry clone's** origin to the same server — same scheme/host/port as the URL you gave, just with the repo name swapped to `hermes` (so `.../hermes-cli.git` becomes `.../hermes.git`), reusing the same resolved token. This is a best-effort sibling switch, not a hard requirement: a host with no registry cloned yet (or that hasn't run `hc init`) just gets a skip message, not a failure — updating `hc` itself is still `self-update`'s main job. Pass `--no-registry` to only switch `hc`'s own checkout and leave the registry clone alone.
 
 ## Shell completion
 

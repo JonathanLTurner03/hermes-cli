@@ -73,3 +73,16 @@ def with_token(url: str, token: str) -> str:
     if parts.port:
         netloc += f":{parts.port}"
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+def sibling_repo_url(url: str, repo_name: str) -> str:
+    """Same scheme/host/port as `url`, with its final path segment (repo
+    name) replaced by `repo_name` -- e.g. turns a SoftServe hermes-cli URL
+    into the sibling hermes registry's URL on that same server. Preserves
+    a trailing ".git" if the original had one. Used so `hc self-update
+    --repo <hermes-cli-url>` can derive the hermes registry's URL on the
+    same server rather than needing it typed out separately.
+    """
+    parts = urlsplit(url)
+    suffix = ".git" if parts.path.rstrip("/").endswith(".git") else ""
+    return urlunsplit((parts.scheme, parts.netloc, f"/{repo_name}{suffix}", parts.query, parts.fragment))

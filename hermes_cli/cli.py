@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import click
@@ -116,6 +117,52 @@ def pull() -> None:
         raise SystemExit(result.returncode)
 
 
+def _switch_repo_origin(root: Path, repo_url: str, token: str | None) -> str | None:
+    """Points `root`'s tracking remote at `repo_url`, embedding a SoftServe
+    token for an http(s) URL (from `token` if given, else the configured
+    file). Returns the resolved token (so a caller switching a second,
+    sibling repo can reuse it instead of re-reading/re-erroring), or None
+    if no token was needed (ssh:///git:// URL).
+    """
+    remote = selfupdate.tracking_remote(root)
+    url = repo_url
+    resolved_token = None
+    if urlsplit(repo_url).scheme in ("http", "https"):
+        resolved_token = token or softserve.read_token()
+        url = softserve.with_token(repo_url, resolved_token)
+    elif token:
+        click.echo("--token ignored: --repo isn't an http(s) URL, so SSH key auth applies instead", err=True)
+    selfupdate.set_remote_url(root, remote, url)
+    click.echo(f"{root}: {remote} now points at {repo_url}")
+    return resolved_token
+
+
+def _switch_registry_origin(repo_url: str, token: str | None) -> None:
+    """Best-effort sibling switch: if this host has already run `hc init`
+    and its registry clone looks like a real git checkout, point it at the
+    hermes registry's URL on the same SoftServe server `repo_url` is on
+    (same scheme/host/port, repo name swapped to "hermes"). Skipped with a
+    message rather than failing self-update outright -- a bare hc install
+    with no registry cloned yet (or no `hc init` run) is a normal state,
+    not an error, and self-update's primary job is updating hc itself.
+    """
+    try:
+        cfg = config.load_config()
+    except SystemExit:
+        click.echo("skipped hermes registry origin switch: `hc init` hasn't run on this host yet", err=True)
+        return
+
+    registry_path = Path(cfg["registry_path"])
+    if not (registry_path / ".git").exists():
+        click.echo(
+            f"skipped hermes registry origin switch: {registry_path} isn't a git checkout", err=True
+        )
+        return
+
+    hermes_url = softserve.sibling_repo_url(repo_url, "hermes")
+    _switch_repo_origin(registry_path, hermes_url, token)
+
+
 @main.command("self-update")
 @click.option("--check", is_flag=True, help="Only check for an update, don't apply it.")
 @click.option(
@@ -123,8 +170,10 @@ def pull() -> None:
     "repo_url",
     default=None,
     help="One-time switch: repoint hc's own git checkout at this URL (e.g. a SoftServe "
-    "remote) before checking/updating. For an http(s) URL, a SoftServe access token is "
-    "embedded automatically — from --token if given, else /etc/hermes-cli/softserve_token.",
+    "remote) before checking/updating. Also switches the hermes registry clone's origin "
+    "to the same server (repo name swapped to \"hermes\"), unless --no-registry is passed "
+    "or this host hasn't run `hc init` yet. For an http(s) URL, a SoftServe access token "
+    "is embedded automatically — from --token if given, else /etc/hermes-cli/softserve_token.",
 )
 @click.option(
     "--token",
@@ -132,21 +181,19 @@ def pull() -> None:
     help="SoftServe access token to use with --repo for an http(s) URL, instead of the one "
     "already configured via `hc init --softserve-token` (or its prompt).",
 )
-def self_update(check: bool, repo_url: str | None, token: str | None) -> None:
+@click.option(
+    "--no-registry",
+    is_flag=True,
+    help="With --repo, only switch hc's own checkout — leave the hermes registry clone's origin alone.",
+)
+def self_update(check: bool, repo_url: str | None, token: str | None, no_registry: bool) -> None:
     """Update hc itself from its own git checkout (separate from `hc pull`, which updates the registry)."""
     root = selfupdate.repo_root()
 
     if repo_url:
-        remote = selfupdate.tracking_remote(root)
-        url = repo_url
-        if urlsplit(repo_url).scheme in ("http", "https"):
-            url = softserve.with_token(repo_url, token or softserve.read_token())
-        elif token:
-            click.echo(
-                "--token ignored: --repo isn't an http(s) URL, so SSH key auth applies instead", err=True
-            )
-        selfupdate.set_remote_url(root, remote, url)
-        click.echo(f"{remote} now points at {repo_url}")
+        resolved_token = _switch_repo_origin(root, repo_url, token)
+        if not no_registry:
+            _switch_registry_origin(repo_url, resolved_token)
 
     selfupdate.fetch(root)
     if not selfupdate.behind_upstream(root):
