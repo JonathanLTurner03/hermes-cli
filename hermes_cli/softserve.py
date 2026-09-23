@@ -11,6 +11,10 @@ Generate one on the server itself, as whichever user hc should act as:
 An ssh:// SoftServe remote doesn't use this at all -- that authenticates
 via a normal SSH keypair/agent, same as any other SSH git remote, so
 there's nothing for a token to do there.
+
+`repo_url()` is the other half: given just a SoftServe *server's* base
+URL, builds a specific repo's clone URL on it -- so a caller only ever
+needs to know the server, not construct each repo's full URL by hand.
 """
 from __future__ import annotations
 
@@ -73,3 +77,27 @@ def with_token(url: str, token: str) -> str:
     if parts.port:
         netloc += f":{parts.port}"
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+def repo_url(server: str, repo_name: str) -> str:
+    """Builds a specific repo's URL from a SoftServe *server's* base URL
+    (scheme://host[:port], no path) -- e.g. base "http://host:23232" +
+    repo_name "hermes-cli" becomes "http://host:23232/hermes-cli.git".
+    http(s) gets a ".git" suffix (matching SoftServe's own documented
+    clone URLs); ssh:// doesn't need one and skips it.
+
+    Raises SoftServeError if `server` already has a path component --
+    `hc self-update --server` takes the *server*, not a specific repo, so
+    a leftover repo-shaped URL here is almost certainly a mistake worth
+    catching rather than silently building a wrong nested path from it.
+    """
+    parts = urlsplit(server)
+    if parts.scheme not in ("http", "https", "ssh"):
+        raise SoftServeError(f"'{server}' isn't a URL with a scheme hc understands (http, https, ssh)")
+    if parts.path.strip("/"):
+        raise SoftServeError(
+            f"'{server}' looks like a specific repo, not a server — pass just the server's "
+            f"base URL (e.g. '{parts.scheme}://{parts.netloc}'), hc builds each repo's URL from that"
+        )
+    suffix = ".git" if parts.scheme in ("http", "https") else ""
+    return urlunsplit((parts.scheme, parts.netloc, f"/{repo_name}{suffix}", "", ""))
