@@ -52,6 +52,35 @@ def behind_upstream(root: Path) -> bool:
     return local.stdout.strip() != upstream.stdout.strip()
 
 
+def tracking_remote(root: Path) -> str:
+    """The name of the remote (usually "origin") the current branch tracks.
+
+    Looked up by name rather than assumed to be "origin" -- self-update
+    only cares about whatever remote HEAD's branch is actually configured
+    against, so --repo's `git remote set-url` targets the right one even
+    if a checkout was ever set up with a non-default remote name.
+    """
+    branch = _run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root, capture_output=True, text=True, check=False
+    )
+    if branch.returncode != 0 or not branch.stdout.strip():
+        raise SelfUpdateError(f"couldn't determine the current branch in {root}")
+    name = branch.stdout.strip()
+
+    remote = _run(
+        ["git", "config", f"branch.{name}.remote"], cwd=root, capture_output=True, text=True, check=False
+    )
+    if remote.returncode != 0 or not remote.stdout.strip():
+        raise SelfUpdateError(f"branch '{name}' in {root} has no configured tracking remote")
+    return remote.stdout.strip()
+
+
+def set_remote_url(root: Path, remote: str, url: str) -> None:
+    result = _run(["git", "remote", "set-url", remote, url], cwd=root, check=False)
+    if result.returncode != 0:
+        raise SelfUpdateError(f"failed to point '{remote}' at the new repo (exit {result.returncode})")
+
+
 def pull_and_install(root: Path) -> None:
     """Fast-forward the checkout and rerun install.sh (safe to rerun; picks up dependency changes)."""
     if is_dirty(root):

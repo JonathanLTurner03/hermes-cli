@@ -22,12 +22,15 @@ cd hermes-cli
 ## First-time host setup
 
 ```
-hc init <server-name> [--registry-path /opt/infra/hermes] [--github-token <token>]
+hc init <server-name> [--registry-path /opt/infra/hermes] [--github-token <token>] [--softserve-token <token>]
 ```
 
 Writes `/etc/hermes-cli/config.yml` with the server name and the local path of your registry clone. `<server-name>` must match a directory name in the registry (`<registry_path>/<server-name>/`). Every other `hc` command reads this file first and fails immediately if it's missing.
 
-If run interactively (a real terminal, not a script) and no token is already configured, it also offers to set up the GitHub token `hc update`'s version-pin flow needs to open pull requests (see below) — prompts for it (input hidden) with a link to create one, skippable if you don't need it yet. Pass `--github-token <token>` to set it non-interactively instead (e.g. from a provisioning script), or just skip the prompt and configure it later — see "Version-pinned updates" for where the file goes and what access the token needs.
+If run interactively (a real terminal, not a script), it also offers to set up two optional tokens, each skippable on its own and configurable later by rerunning `hc init` or writing the file directly:
+
+- The GitHub token `hc update`'s version-pin flow needs to open pull requests (see "Version-pinned updates" below) — prompts for it (input hidden) with a link to create one. Pass `--github-token <token>` to set it non-interactively instead (e.g. from a provisioning script).
+- A SoftServe access token, if this fleet's git server has moved to a self-hosted [SoftServe](https://github.com/charmbracelet/soft-serve) instance — used by `hc self-update --repo` (see below) and, in future, an http(s) `hc pull` remote. Generate one on the server itself (`ssh -p <port> <softserve-host> token create hc-<this-host>`) and paste it in, or pass `--softserve-token <token>` non-interactively. Written to `/etc/hermes-cli/softserve_token`, same 600-permissions posture as the GitHub token.
 
 Writing it requires root — you don't need to type `sudo` yourself, though. `init` and the mount commands that write to `/etc` (`mount sync`/`enable`/`disable`) self-elevate: if not already running as root, they re-exec themselves under `sudo`, which prompts for your password exactly as if you'd typed `sudo hc ...`. This only works with a tty attached (interactive use); from a script or cron job with no terminal to prompt on, run those commands with `sudo` explicitly. Read-only commands (`services`, `where`, `status`, `mount status`) never need root and never prompt.
 
@@ -40,10 +43,12 @@ Git-pulls the registry clone at the configured path. This only updates the *regi
 ## Updating `hc` itself
 
 ```
-hc self-update [--check]
+hc self-update [--check] [--repo <url> [--token <token>]]
 ```
 
 `hc pull` only syncs the registry clone; it has no way to know about — let alone apply — changes to `hc`'s own source. `hc self-update` is the separate command for that: it finds its own git checkout (via the editable install's module path, so no extra config is needed), fetches, and compares `HEAD` against the tracking branch. With no changes upstream, it reports "up to date" and exits. If there's an update, `--check` reports it without applying anything; without `--check`, it fast-forwards the checkout (`git pull --ff-only`, refusing if the checkout has uncommitted local changes) and reruns `install.sh` to pick up any dependency changes. Requires the checkout to be on a branch with a configured upstream (i.e. cloned normally, not detached).
+
+`--repo <url>` is a one-time switch: before checking/updating, it points the checkout's tracking remote (whatever `hc`'s current branch is actually configured against — usually `origin`, but looked up by name rather than assumed) at a new URL, most likely a self-hosted [SoftServe](https://github.com/charmbracelet/soft-serve) instance instead of GitHub. For an `http(s)://` URL, a SoftServe access token gets embedded automatically as the URL's basic-auth username — from `--token` if given, otherwise whatever's already configured at `/etc/hermes-cli/softserve_token` (see `hc init --softserve-token` above); with neither available, it fails clearly rather than switching to a URL nothing can authenticate against. An `ssh://` URL skips all of this and authenticates via SSH key/agent instead, same as any other SSH git remote — `--token` is ignored (with a warning) if passed alongside one. Once switched, the remote stays that way for every future plain `hc self-update` — `--repo` only needs to run again to switch somewhere else.
 
 ## Shell completion
 
