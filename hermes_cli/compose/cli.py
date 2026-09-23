@@ -10,6 +10,7 @@ from pathlib import Path
 import click
 
 from .. import config, github, registry_git
+from ..secrets import registry as secrets_registry
 from . import docker, imageref, networks, registry, versioncheck
 
 
@@ -40,9 +41,10 @@ def _complete_service_or_all(ctx: click.Context, param: click.Parameter, incompl
 
 def _ensure_ready(cfg: dict, service: str):
     """Preconditions shared by any command that starts/recreates containers:
-    refuse if declared secrets are missing, and make sure external networks
-    the compose file expects already exist. Returns the resolved compose
-    file path so the caller doesn't have to look it up again.
+    refuse if declared secrets are missing, decrypt any sops-managed
+    secrets fresh, and make sure external networks the compose file expects
+    already exist. Returns the resolved compose file path so the caller
+    doesn't have to look it up again.
     """
     compose_path = registry.compose_file(cfg, service)
 
@@ -51,6 +53,8 @@ def _ensure_ready(cfg: dict, service: str):
             f"'{service}' expects .env.secrets but none found at "
             f"{registry.service_path(cfg, service) / '.env.secrets'} — copy it before starting"
         )
+
+    secrets_registry.sync(cfg, service)
 
     for net in registry.external_networks(cfg, service):
         networks.ensure(net)
