@@ -30,6 +30,19 @@ def sync_symlinks(target_dir: Path, desired: dict[str, Path], force: bool = Fals
     (or a stale one no longer in the registry) is left in place unless
     `force` is set — clobbering it silently could delete something
     hand-placed on the host.
+
+    Every desired entry's symlink is unconditionally recreated (unlink +
+    re-link), even when it already points at the right target — not just
+    when something's actually new or changed. Traefik's file provider
+    watches target_dir itself via inotify, which only fires on events
+    inside that directory; editing route.yml's *content* happens
+    elsewhere in the registry and generates no event there at all, so a
+    symlink that already "looks right" can silently be serving stale
+    config with no way to tell from the diff output. Recreating it every
+    run forces a real create event Traefik does see, so `hc sync` always
+    guarantees a fresh reload — confirmed necessary by testing: editing an
+    already-synced route.yml in place, with no symlink change, left
+    Traefik serving the old content indefinitely.
     """
     target_dir.mkdir(parents=True, exist_ok=True)
     diff = SyncDiff()
@@ -46,8 +59,7 @@ def sync_symlinks(target_dir: Path, desired: dict[str, Path], force: bool = Fals
             continue
 
         current = existing[name]
-        if current.is_symlink() and Path(os.readlink(current)) == resolved:
-            continue
+        unchanged = current.is_symlink() and Path(os.readlink(current)) == resolved
         if not current.is_symlink() and not force:
             raise RouteError(
                 f"{current} already exists and isn't a symlink hc manages — "
@@ -55,7 +67,8 @@ def sync_symlinks(target_dir: Path, desired: dict[str, Path], force: bool = Fals
             )
         current.unlink()
         link_path.symlink_to(resolved)
-        diff.changed.append(name)
+        if not unchanged:
+            diff.changed.append(name)
 
     for name, path in existing.items():
         if name in desired:
