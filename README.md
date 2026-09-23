@@ -3,7 +3,7 @@
 > [!WARNING]
 > **Personal project — use at your own risk.** This is a side project I built to save myself time managing my own small homelab, not a maintained tool for general use. It leans heavily on AI as a development tool, because I don't have the spare time to hand-write and hand-test all of this myself on top of a full-time job and other projects. It's built and tested against my own specific setup and workflows — there's no unit test suite, no CI, and no guarantee any of it behaves correctly outside the exact scenarios I've personally exercised. If you use this, read the code first, understand what a command actually does before running it against anything you care about, and don't expect support.
 
-`hc` is a fleet-management CLI. It runs on each host in your fleet, reads a small per-host identity file, pulls configuration from a shared "hermes" git registry, and applies it locally: starting/stopping Docker Compose services and rendering/enabling systemd mount units. Nothing about *what* runs on a host is kept on the host itself — it all lives in the registry and gets applied via `hc`.
+`hc` is a fleet-management CLI. It runs on each host in your fleet, reads a small per-host identity file, pulls configuration from a shared "hermes" git registry, and applies it locally: starting/stopping Docker Compose services, rendering/enabling systemd mount units, and rendering enabled Traefik routes onto the reverse-proxy host. Nothing about *what* runs on a host is kept on the host itself — it all lives in the registry and gets applied via `hc`.
 
 This README covers the CLI. For how the registry repo itself is laid out — adding a new service, adding a mount spec, secrets handling — see that repo's own README.
 
@@ -117,6 +117,16 @@ Storage pools (e.g. `mnt-pool`) are intentionally not registry-managed — each 
 
 `hc up`/`hc update` call the same decrypt-and-write step automatically before starting or recreating a container, right after the existing `.env.secrets` presence check — so a service with a `secrets.enc.yaml` always gets a fresh decrypt on every deploy, with nothing else to remember on the host beyond having run `age-keygen` once and having a matching `.sops.yaml` entry.
 
+## Route sync
+
+`hc sync` renders every *enabled* Traefik route in the registry onto the reverse-proxy host, as a symlink into `<server>/traefik/dynamic-enabled/` — the directory Traefik's file provider watches. Only meaningful on whichever host actually runs Traefik (a `traefik/` compose directory must exist under that host's own registry directory); running it anywhere else fails clearly.
+
+| Command | What it does |
+|---|---|
+| `hc sync [--force]` | Scans the *whole* registry clone (not just this host's own directory) for `route.yml` files, renders a symlink for each one whose sibling `enabled` marker file is present, and removes symlinks for routes that are no longer enabled. Prints a diff of added/changed/removed routes, plus a list of any route.yml found without an `enabled` marker. Refuses to touch a `dynamic-enabled/` entry it doesn't recognize as its own unless `--force` is passed. |
+
+A route's config (`route.yml`) lives next to the service it points to — e.g. `<backend-host>/jellyseerr/route.yml` — not under the Traefik host's own directory, so a route stays auditable right alongside the service it fronts and adding one never requires touching the Traefik host's config directly. The one exception is routes to things `hc` doesn't manage at all (nothing under a `docker-compose.yml` — e.g. a router/switch controller UI), which live under `<traefik-host>/routes/<name>/route.yml` instead. Either way, a route only goes live once an empty `enabled` marker file sits next to it and `hc sync` has been run — deleting that marker (then re-syncing) is how a route is taken down, no separate command needed.
+
 ## How it's organized
 
-Each feature (compose, mount, secrets) is a self-contained subpackage: its own CLI commands, its own registry-path resolution, its own wrapper around the underlying tool (`docker`/`systemd`/`sops`). See [CLAUDE.md](CLAUDE.md) for the exact layout and conventions if you're extending this — it's written for an AI coding agent working in this repo, but it's a reasonable map for a human too.
+Each feature (compose, mount, secrets, route) is a self-contained subpackage: its own CLI commands, its own registry-path resolution, its own wrapper around the underlying tool (`docker`/`systemd`/`sops`/plain symlinks). See [CLAUDE.md](CLAUDE.md) for the exact layout and conventions if you're extending this — it's written for an AI coding agent working in this repo, but it's a reasonable map for a human too.

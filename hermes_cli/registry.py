@@ -23,3 +23,18 @@ def server_root(config: dict) -> Path:
             f"does the hermes registry have an entry for this host?"
         )
     return root
+
+
+def registry_root(config: dict) -> Path:
+    """The whole registry clone, not just this host's <server>/ subdirectory.
+
+    Only needed by features that deliberately look beyond their own host's
+    tree — currently just `hc sync` (see route/registry.py), which finds
+    route.yml files under *other* hosts' directories.
+    """
+    root = Path(config["registry_path"])
+    if not root.exists():
+        raise RegistryError(
+            f"No registry clone at {root} — has `hc init` / `hc pull` run yet?"
+        )
+    return root

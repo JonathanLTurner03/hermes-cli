@@ -8,6 +8,7 @@ import click
 from . import config, github, privilege, selfupdate
 from .compose.cli import COMMANDS as _compose_commands
 from .mount.cli import mount
+from .route.cli import route_sync
 from .secrets.cli import secrets
 
 
@@ -105,6 +106,7 @@ for _cmd in _compose_commands:
     main.add_command(_cmd)
 
 main.add_command(mount)
+main.add_command(route_sync)
 main.add_command(secrets)
 
 
